@@ -65,6 +65,55 @@ UdnReadVolume (
     return Status;
 }
 
+/*
+ * A paging read the device cannot take as it stands. The Memory Manager reads
+ * the sections of a program at their file alignment - 512 bytes for most -
+ * and a CD's 2048-byte sectors (or a 4K disk's) do not divide that: sent on,
+ * the read fails or overruns the pages it is for, and the program dies
+ * (0xC0000005) or will not start. It goes through the engine instead, which
+ * reads whole sectors and copies the bytes asked for; the rest of the buffer,
+ * and what lies past valid data, is zeros.
+ */
+static NTSTATUS
+UdnUnalignedPagingRead (
+    PUDN_IRP_CONTEXT Ctx,
+    PUDN_FCB Fcb,
+    LONGLONG StartingVbo,
+    ULONG ByteCount
+    )
+{
+    PUDN_VCB Vcb = Fcb->Vcb;
+    PIRP Irp = Ctx->Irp;
+    LONGLONG ValidData = Fcb->Header.ValidDataLength.QuadPart;
+    ULONG BufferBytes = Ctx->IrpSp->Parameters.Read.Length;
+    ULONG Want = 0, Got = 0;
+    PUCHAR Buffer;
+    NTSTATUS Status;
+
+    Buffer = (PUCHAR)UdnMdlAddress(Irp->MdlAddress);
+    if (Buffer == NULL) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (BufferBytes > MmGetMdlByteCount(Irp->MdlAddress)) {
+        BufferBytes = MmGetMdlByteCount(Irp->MdlAddress);
+    }
+    if (ByteCount > BufferBytes) {
+        ByteCount = BufferBytes;
+    }
+    RtlZeroMemory(Buffer, BufferBytes);
+
+    if (StartingVbo < ValidData) {
+        Want = (ValidData - StartingVbo < (LONGLONG)ByteCount) ? (ULONG)(ValidData - StartingVbo) : ByteCount;
+    }
+    if (Want == 0) {
+        return STATUS_SUCCESS;
+    }
+
+    UdnEngineEnter(Vcb);
+    Status = UfxReadFile(&Vcb->Vol, Fcb->Ino, &Fcb->Inode, (ULONGLONG)StartingVbo, Want, Buffer, &Got);
+    return UdnEngineLeave(Vcb, Status);
+}
+
 /* The cached read, run through UdnTryCall (the Cache Manager raises) */
 typedef struct _UDN_CC_READ {
     PFILE_OBJECT FileObject;
@@ -200,6 +249,17 @@ UdnReadFile (
         } else {
 
             Transfer = (ULONG)UdnRoundUp(ByteCount, UDN_SECTOR_SIZE);
+
+            if (PagingIo && !(Fcb->FcbState & FCB_STATE_PAGING_FILE) &&
+                (((ULONG)StartingByte.QuadPart & (UDN_SECTOR_SIZE - 1)) != 0 ||
+                 Transfer > IrpSp->Parameters.Read.Length)) {
+
+                Status = UdnUnalignedPagingRead(Ctx, Fcb, StartingByte.QuadPart, ByteCount);
+                if (NT_SUCCESS(Status)) {
+                    Irp->IoStatus.Information = ByteCount;
+                }
+                __leave;
+            }
 
             if (!PagingIo) {
                 Status = UdnLockUserBuffer(Irp, IoWriteAccess, Transfer);

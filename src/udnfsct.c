@@ -91,7 +91,14 @@ UdnLoadLabel (
     }
 }
 
-/* A UDF volume recognition sequence at byte 32768 (descriptors every Step bytes) */
+/*
+ * A UDF volume recognition sequence at byte 32768. Its descriptors are 2048
+ * bytes (or a sector) apart, or - as udffmt and mkudffs write them for blocks
+ * larger than 2048 bytes - a block apart: when the first one is there but the
+ * sequence does not follow, the wider spacings up to 64 KB are tried, the
+ * descriptors gathered Len bytes apart in Buffer (16 * Len bytes, Len at
+ * most 4096).
+ */
 static BOOLEAN
 UdnProbeVrs (
     PDEVICE_OBJECT Device,
@@ -99,11 +106,30 @@ UdnProbeVrs (
     PUCHAR Buffer
     )
 {
-    ULONG Step = SectorSize > 2048 ? SectorSize : 2048;
-    if (!NT_SUCCESS(UdnReadSectors(Device, 32768, 16 * Step, Buffer, TRUE))) {
+    ULONG Len = SectorSize > 2048 ? SectorSize : 2048;
+    ULONG Step, i;
+
+    if (!NT_SUCCESS(UdnReadSectors(Device, 32768, 16 * Len, Buffer, TRUE))) {
         return FALSE;
     }
-    return UfxIsVrs(Buffer, 16 * Step, Step);
+    if (UfxIsVrs(Buffer, 16 * Len, Len)) {
+        return TRUE;
+    }
+    if (RtlCompareMemory(Buffer + 1, "BEA01", 5) != 5) {
+        return FALSE;                           /* no recognition sequence at all */
+    }
+    for (Step = Len * 2; Step <= 65536; Step *= 2) {
+        RtlZeroMemory(Buffer, 16 * Len);
+        for (i = 0; i < 16; i++) {
+            if (!NT_SUCCESS(UdnReadSectors(Device, 32768 + (ULONGLONG)i * Step, Len, Buffer + i * Len, TRUE))) {
+                break;
+            }
+        }
+        if (UfxIsVrs(Buffer, i * Len, Len)) {
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 #define UDN_PROBE_BYTES         (16 * 4096)

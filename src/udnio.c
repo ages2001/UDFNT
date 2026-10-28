@@ -704,6 +704,15 @@ UdnNonCachedIo (
         } else if (NT_SUCCESS(Status) && (TransferEnd & BlockMask) && !(StartingVbo & BlockMask)) {
             Status = UdnPrepareEdge(Vcb, Fcb, StartingVbo);
         }
+        /*
+         * The rest of the range in one go (the edges have their blocks now,
+         * zeroed where the write leaves part of them): one block at a time
+         * below it is an engine call and a block-sized transfer per block,
+         * and a large write into new space crawls.
+         */
+        if (NT_SUCCESS(Status)) {
+            Status = UdnAllocateRange(Vcb, Fcb, StartingVbo, TransferEnd);
+        }
         if (!NT_SUCCESS(Status)) {
             return Status;
         }
@@ -723,6 +732,15 @@ UdnNonCachedIo (
         Length = (ULONG)(TransferEnd - Vbo);
         if (Length > Contiguous) {
             Length = Contiguous;
+        }
+        /*
+         * Contiguous can reach 1 GB, and a disk driver need not split what it
+         * is sent (not every one does, nor every port driver below it):
+         * each request to the device stays within UDN_MAX_SYNC_IO, as the
+         * engine's own sector I/O does.
+         */
+        if (Lbo != -1 && Length > UDN_MAX_SYNC_IO) {
+            Length = UDN_MAX_SYNC_IO;
         }
 
         if (Lbo == -1) {

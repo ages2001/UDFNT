@@ -1,5 +1,50 @@
 UDFNT - Changelog
 
+v1.1.0.0
+Changelog:
+- Fixed: most programs run from a CD / DVD (UDF or ISO / UDF bridge disc)
+  crashed with 0xC0000005 or would not start, udfinst among them. Windows
+  reads a program's sections at their 512-byte file alignment, which the
+  2048-byte sectors of a disc do not divide; such reads now go through
+  whole sectors (programs aligned to 2048 or 4096 bytes were not affected).
+- Fixed: unbuffered and paging I/O sent each contiguous run to the disk as
+  one request of up to 1 GB, which disk and port drivers that do not split
+  requests fail; requests to the device now stay within 64 KB.
+- Fixed: an unbuffered write into new space allocated, and wrote, one block
+  at a time (48 MB on 512-byte blocks took about a minute); the range is now
+  allocated in one go.
+- Fixed: volumes with blocks larger than 2048 bytes on hard and removable
+  disks (udffmt /B:4096 and up, mkudffs -b 4096) were not mounted: their
+  recognition sequence has a descriptor per block, and only 2048-byte
+  spacing was looked for.
+- Fixed: after a file was deleted, a new file whose entry took the freed
+  block could open as the deleted one (empty, or its old contents) when
+  the deleted file's entry had already been written out; whether the last
+  link went is now decided from the links before the delete.
+- Fixed: byte-range locks were not released when a handle was closed
+  (i386 build). WritePrivateProfileString, Explorer writing desktop.ini and
+  any program locking a file hung on the next lock of that file.
+- Fixed: "Safely Remove Hardware" was always refused for UDF volumes on
+  Windows 2000 and XP (i386 build): the driver now answers Plug and Play
+  removal, lets the volume go cleanly, refuses while a file on it is open,
+  and handles a stick pulled without it.
+- Fixed: volumes formatted by Windows 7 - 11 (UDF 2.50 / 2.60) could not be
+  written: creating a file or folder failed with "The disk structure is
+  corrupted and unreadable". The metadata bitmap embedded in its file entry
+  and the metadata mirror sharing the metadata file's blocks are supported.
+- Fixed: on a volume left by an interrupted Windows 11 2.60 format, the
+  metadata partition could not grow ("disk full") and a new file entry could
+  overwrite the metadata mirror's entry.
+- Fixed: a volume lock dropped by closing its handle (without
+  FSCTL_UNLOCK_VOLUME) now resumes the volume like an unlock; a locked volume
+  is left alone at shutdown.
+- udfinst: Windows' own UDF driver (udfs.sys) is turned off in every control
+  set, Last Known Good too (udfinst /U gives it back in all of them).
+- udfchk: no false errors for a metadata mirror sharing the metadata file's
+  blocks or split into other extents; the embedded metadata bitmap is
+  checked; /F repairs what an interrupted Windows 11 format leaves (the
+  mirror's file entry, the bitmaps, the integrity descriptor).
+
 v1.0.0.0
 Changelog:
 - Initial Release.

@@ -391,7 +391,8 @@ UdnCommonShutdown (
 
             (VOID)ExAcquireResourceExclusiveLite(&Vcb->Resource, TRUE);
 
-            if (Vcb->VcbState & VCB_STATE_MOUNTED) {
+            /* (a locked volume is the locker's: it was left clean at the lock) */
+            if ((Vcb->VcbState & VCB_STATE_MOUNTED) && !(Vcb->VcbState & VCB_STATE_LOCKED)) {
                 /* From now on every change goes to the disk at once (UdnEngineLeave):
                    the journal is closed and the volume marked clean */
                 Vcb->VcbState |= VCB_STATE_SHUTDOWN;

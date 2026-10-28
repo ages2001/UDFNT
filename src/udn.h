@@ -179,6 +179,13 @@ typedef IO_STACK_LOCATION EXTENDED_IO_STACK_LOCATION, *PEXTENDED_IO_STACK_LOCATI
  * pool tag, makes the critical region a no-op pair, and keeps the top-level
  * IRP in one process-wide slot. A Visual C++ NT 3.1 build would instead use
  * the real inline thread-field accessors.
+ *
+ * The requestor of an IRP is the process of the thread it carries: that is
+ * the current process when the IRP runs in its own thread, as a cleanup does
+ * (the closing thread sends it). It must be right there: the byte-range locks
+ * a handle took go at its cleanup only when they are matched by process, or
+ * they outlive the handle and the next lock of the file waits for ever
+ * (WritePrivateProfileString, Explorer writing desktop.ini).
  */
 #define ExAllocatePoolWithTag(Type, Size, Tag)  ExAllocatePool((Type), (Size))
 #define KeEnterCriticalRegion()                 ((void)0)
@@ -186,7 +193,11 @@ typedef IO_STACK_LOCATION EXTENDED_IO_STACK_LOCATION, *PEXTENDED_IO_STACK_LOCATI
 extern PIRP UdnXTopLevelIrp;
 #define IoGetTopLevelIrp()          (UdnXTopLevelIrp)
 #define IoSetTopLevelIrp(I)         (UdnXTopLevelIrp = (PIRP)(I))
-#define IoGetRequestorProcess(Irp)  ((PEPROCESS)0)
+#define IoGetRequestorProcess(Irp)  UdnRequestorProcess(Irp)
+static __inline PEPROCESS UdnRequestorProcess(PIRP Irp)
+{
+    return Irp->Tail.Overlay.Thread == PsGetCurrentThread() ? IoGetCurrentProcess() : (PEPROCESS)0;
+}
 #define IoGetDeviceToVerify(T)      ((PDEVICE_OBJECT)0)
 #define IoSetDeviceToVerify(T, D)   ((void)0)
 #endif

@@ -18,7 +18,7 @@ test harness - with an NT driver layer on top.
 
 | | |
 |---|---|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **File system** | UDF 1.02, 1.50, 2.00, 2.01, 2.50, 2.60 |
 | **Media** | hard and removable disks (512 - 4096-byte sectors), CD / DVD / BD drives, ISO / UDF bridge discs |
 | **Windows** | NT 3.1, 3.5, 3.51, 4.0, 2000, XP (x86); XP x64 / Server 2003 x64 (amd64) |

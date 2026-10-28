@@ -371,11 +371,14 @@ UdnCommonCleanup (
 
             if (Vcb->LockFileObject == FileObject) {
 
+                /* closed without FSCTL_UNLOCK_VOLUME: the lock goes with the handle */
                 UdnUnlockVcb(Vcb);
 
                 /* Metadata may have been rewritten under us */
                 if (Vcb->VcbState & VCB_STATE_DASD_WRITTEN) {
                     (VOID)UdnDismountVcb(Vcb);
+                } else {
+                    UdnResumeWriting(Vcb);
                 }
             }
 
@@ -711,6 +714,7 @@ UdnUnlinkName (
     PUFX_INODE Dir;
     NTSTATUS Status;
     PUDN_FCB Parent;
+    ULONG LinksBefore = 0;
 
     if (Fcb->FcbState & FCB_STATE_DELETED) {
         return STATUS_SUCCESS;
@@ -723,6 +727,10 @@ UdnUnlinkName (
     (VOID)ExAcquireResourceExclusiveLite(&Fcb->PagingIoResource, TRUE);
 
     UdnEngineEnter(Vcb);
+    /* the links the inode has now: its last one going takes the inode */
+    if (NT_SUCCESS(UfxReadInode(&Vcb->Vol, Fcb->Ino, &Temp))) {
+        LinksBefore = Temp.LinksCount;
+    }
     Dir = UdnDirInode(Vcb, Fcb->DeleteParentIno, &Temp);
     if (Dir == NULL) {
         Status = STATUS_FILE_CORRUPT_ERROR;
@@ -731,9 +739,15 @@ UdnUnlinkName (
                            Fcb->DeleteNameLength);
     }
     if (NT_SUCCESS(Status)) {
-        /* the engine changed the inode on the disk: our copy follows */
-        if (!NT_SUCCESS(UfxReadInode(&Vcb->Vol, Fcb->Ino, &Fcb->Inode)) ||
-            Fcb->Inode.LinksCount == 0 || UdnIsDcb(Fcb) || (Fcb->FcbState & FCB_STATE_SYMLINK)) {
+        /*
+         * Decided by the links before: an inode freed by the unlink cannot be
+         * read back reliably - its block still holds the old entry once a
+         * commit wrote it, links and all - and a live FCB left for it would be
+         * found by the next file whose entry takes that block.
+         */
+        if (LinksBefore <= 1 || UdnIsDcb(Fcb) || (Fcb->FcbState & FCB_STATE_SYMLINK) ||
+            !NT_SUCCESS(UfxReadInode(&Vcb->Vol, Fcb->Ino, &Fcb->Inode)) ||
+            Fcb->Inode.LinksCount == 0) {
             Fcb->FcbState |= FCB_STATE_DELETED;
         }
         UdnForgetMapping(Fcb);
